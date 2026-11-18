@@ -1,0 +1,21 @@
+# Keeps orders moving even when nobody visits the store: every 3 hours it asks the store to check orders
+# (send to CJ, tracking numbers, delivered, problems for the owner), cart reminders and the weekly email.
+name: Order watch
+on:
+  schedule:
+    - cron: '41 */3 * * *'   # every 3 hours
+  workflow_dispatch:
+permissions:
+  actions: write
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: curl -s -m 120 -X POST https://glimmo.store/api/nudge | head -c 300; echo
+      # Studio: if Mark asked for new posts (or fewer than 2 are waiting), start the post maker.
+      - run: |
+          W=$(curl -s -m 30 https://glimmo.store/api/studio/want || echo '{}'); echo "$W"
+          if echo "$W" | grep -q '"want":true'; then gh workflow run studio.yml --repo "$GITHUB_REPOSITORY" --ref main && echo "Studio started"; fi
+        env:
+          GH_TOKEN: ${{ github.token }}
