@@ -1,0 +1,57 @@
+# Glimmo Studio: makes 2 aesthetic carousel posts (cover + 8 products + collage) as DRAFTS.
+# Nothing is posted here. Mark approves each one in admin > Studio, then the website posts it.
+# Runs every morning (5:37 am Kenya) if fewer than 2 drafts are waiting, when Mark taps "Make 2 new posts"
+# (started by Order watch), or by hand: Actions > Glimmo Studio > Run workflow.
+name: Glimmo Studio
+permissions: { contents: read }
+on:
+  schedule:
+    - cron: '37 2 * * *'   # 5:37 am Kenya, well before the 7:30 am post
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'How many posts to make (1-4)'
+        required: false
+        default: '2'
+  push:
+    branches: [main]
+    paths: ['tools/studio/run.txt']
+concurrency:
+  group: glimmo-studio
+  cancel-in-progress: false
+jobs:
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Needed?
+        id: need
+        run: |
+          W=$(curl -s -m 30 https://glimmo.store/api/studio/want || echo '{}'); echo "$W"
+          if [ "${{ github.event_name }}" != "schedule" ] || echo "$W" | grep -q '"want":true'; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "Enough drafts are waiting. Nothing to do."; fi
+      - uses: actions/checkout@v4
+        with:
+          repository: bigimanji-ops/glimmo-store
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+        if: steps.need.outputs.go == '1'
+      - uses: actions/setup-node@v4
+        if: steps.need.outputs.go == '1'
+        with:
+          node-version: '20'
+      - name: Install browser + ffmpeg
+        if: steps.need.outputs.go == '1'
+        run: |
+          npm i --no-save --no-audit --no-fund playwright@1.49.1
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
+          # Ubuntu mirrors sometimes fail DNS for a few minutes: retry before giving up
+          for i in 1 2 3; do command -v ffmpeg >/dev/null && break; (sudo apt-get update -qq || true) >/dev/null 2>&1; sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 || sleep 60; done
+          command -v ffmpeg >/dev/null
+      - name: Make drafts
+        if: steps.need.outputs.go == '1'
+        run: node tools/studio/make.js
+        env:
+          STUDIO_COUNT: ${{ github.event.inputs.count || '2' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
