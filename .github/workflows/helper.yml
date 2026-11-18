@@ -1,0 +1,55 @@
+# Helper: every 15 minutes, checks if a small job was queued for it (like making a sample video).
+# If nothing is queued it stops in a few seconds. Only the job names written in tools/helper.js can run.
+name: Helper
+permissions: { contents: read }
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+concurrency:
+  group: glimmo-helper
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Anything queued?
+        id: q
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          Q=$(curl -s -m 30 "$SUPABASE_URL/rest/v1/settings?key=eq.robot_tasks&select=value" -H "apikey: $SUPABASE_SERVICE_KEY" -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" || echo '[]')
+          if echo "$Q" | grep -q '"status": *"pending"'; then echo "go=1" >> "$GITHUB_OUTPUT"; else echo "Nothing queued."; fi
+      - uses: actions/checkout@v4
+        if: steps.q.outputs.go == '1'
+        with:
+          repository: bigimanji-ops/glimmo-store
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        if: steps.q.outputs.go == '1'
+        with:
+          node-version: '20'
+      - name: Install ffmpeg
+        if: steps.q.outputs.go == '1'
+        run: |
+          for i in 1 2 3; do command -v ffmpeg >/dev/null && break; (sudo apt-get update -qq || true) >/dev/null 2>&1; sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1 || sleep 30; done
+      - name: Run the job
+        if: steps.q.outputs.go == '1'
+        run: node tools/helper.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+      - uses: actions/upload-artifact@v4
+        if: steps.q.outputs.go == '1'
+        with:
+          name: output
+          path: out/
+          retention-days: 7
+          if-no-files-found: ignore
