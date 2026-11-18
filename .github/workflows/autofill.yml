@@ -1,0 +1,42 @@
+# FREE auto-fill for Glimmo. GitHub runs this, not Netlify, so it uses no Netlify credits (private repos get 2,000 free minutes a month).
+# Twice a day (5:17 AM and 5:17 PM Kenya time) it adds products, which keeps it inside GitHub's 2,000 free minutes a month, if "Cloud auto-fill ON" is ticked in admin, until today's number is reached.
+# Big fill now: Actions > Glimmo auto-fill > Run workflow, and type how many minutes it may run (up to 330 = 5.5 hours).
+name: Glimmo auto-fill
+permissions: { contents: read }
+on:
+  schedule:
+    - cron: '17 14 * * *'   # daily
+  push:
+    branches: [main]
+    paths: ['tools/run-now.txt']   # changing this file starts a 45-minute run straight away
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'How many minutes to run (30 = normal, 330 = biggest). Each product takes about 15-30 seconds to check.'
+        required: false
+        default: '30'
+concurrency:
+  group: glimmo-autofill
+  cancel-in-progress: false
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: bigimanji-ops/glimmo-store
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Add new products
+        run: node tools/github-autofill.js
+        env:
+          AUTOFILL_MINUTES: ${{ github.event.inputs.minutes || (github.event_name == 'push' && '45') || '30' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CJ_SHIP_TO: ${{ secrets.CJ_SHIP_TO }}
