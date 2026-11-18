@@ -1,0 +1,50 @@
+# Daily posts: posts the Morning (7:30 am), Afternoon (1:30 pm) and Night (8:00 pm) Kenya-time posts that Mark APPROVED in admin > Studio.
+# Starts 10 minutes early and waits for the exact time. If nothing is approved, it stops in a few seconds.
+name: Daily posts
+permissions: { contents: read }
+on:
+  schedule:
+    # Kenya = UTC+3. Starts 10 minutes before 7:30 am, 1:30 pm and 8:00 pm Kenya.
+    - cron: '20 4 * * *'
+    - cron: '20 10 * * *'
+    - cron: '50 16 * * *'
+    # Back-ups: GitHub sometimes starts scheduled runs late (or skips them). These check again about 15 and 40 minutes
+    # after each time; if the post already went up they stop in a few seconds.
+    - cron: '10 5,11 * * *'
+    - cron: '40 17 * * *'
+    - cron: '45 4,10 * * *'
+    - cron: '15 17 * * *'
+  workflow_dispatch:
+concurrency:
+  group: glimmo-slots
+  cancel-in-progress: false
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+      TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: bigimanji-ops/glimmo-store
+          token: ${{ secrets.PRIVATE_REPO_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Anything approved for now?
+        id: need
+        run: node tools/studio/slots.js check
+      - name: Install browser
+        if: steps.need.outputs.go == '1'
+        run: |
+          npm i --no-save --no-audit --no-fund playwright@1.49.1
+          timeout 300 npx playwright install --with-deps chromium || npx playwright install chromium
+      - name: Post
+        if: steps.need.outputs.go == '1'
+        run: node tools/studio/slots.js
